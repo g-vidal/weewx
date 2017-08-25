@@ -7,12 +7,13 @@ After=time-sync.target
 RequiresMountsFor=/home
 
 [Service]
-ExecStart=/home/weewx/bin/weewxd --daemon --pidfile=/var/run/weewx.pid /home/weewx/weewx.conf
+ExecStart=/usr/bin/weewxd --daemon --pidfile=/var/run/weewx/weewx.pid /etc/weewx/weewx.conf
 ExecReload=/bin/kill -HUP $MAINPID
 Type=simple
+RuntimeDirectory=weewx
 PIDFile=/var/run/weewx.pid
-#User=weewx
-#Group=weewx
+User=weewx
+Group=weewx
 
 [Install]
 WantedBy=multi-user.target
