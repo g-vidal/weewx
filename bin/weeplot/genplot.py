@@ -34,8 +34,8 @@ class GeneralPlot(object):
         
         self.line_list = []
         
-        self.xscale = None
-        self.yscale = None
+        self.xscale = (None, None, None)
+        self.yscale = (None, None, None)
 
         self.anti_alias             = int(config_dict.get('anti_alias',  1))
 
@@ -61,7 +61,8 @@ class GeneralPlot(object):
         self.unit_label_font_color  = weeplot.utilities.tobgr(config_dict.get('unit_label_font_color', '0x000000'))
         self.unit_label_font_size   = int(config_dict.get('unit_label_font_size', 10)) * self.anti_alias
         self.unit_label_position    = (10 * self.anti_alias, 0)
-        
+
+        self.bottom_label           = ""
         self.bottom_label_font_path = config_dict.get('bottom_label_font_path')
         self.bottom_label_font_color= weeplot.utilities.tobgr(config_dict.get('bottom_label_font_color', '0x000000'))
         self.bottom_label_font_size = int(config_dict.get('bottom_label_font_size', 10)) * self.anti_alias
@@ -73,6 +74,12 @@ class GeneralPlot(object):
 
         self.x_label_format         = to_unicode(config_dict.get('x_label_format'))
         self.y_label_format         = to_unicode(config_dict.get('y_label_format'))
+        
+        self.x_nticks               = int(config_dict.get('x_nticks', 10))
+        self.y_nticks               = int(config_dict.get('y_nticks', 10))
+
+        self.x_label_spacing        = int(config_dict.get('x_label_spacing', 2))
+        self.y_label_spacing        = int(config_dict.get('y_label_spacing', 2))
         
         # Calculate sensible margins for the given image and font sizes.
         self.lmargin = int(4.0 * self.axis_label_font_size)
@@ -102,6 +109,9 @@ class GeneralPlot(object):
         self.daynight_night_color   = weeplot.utilities.tobgr(config_dict.get('daynight_night_color', '0xf0f0f0'))
         self.daynight_edge_color    = weeplot.utilities.tobgr(config_dict.get('daynight_edge_color', '0xefefef'))
         self.daynight_gradient      = int(config_dict.get('daynight_gradient', 20))
+
+        self.latitude               = None
+        self.longitude              = None
 
     def setBottomLabel(self, bottom_label):
         """Set the label to be put at the bottom of the plot.
@@ -195,7 +205,8 @@ class GeneralPlot(object):
             image.thumbnail((self.image_width / self.anti_alias, self.image_height / self.anti_alias), Image.ANTIALIAS)
 
         return image
-    
+
+    # noinspection PyMethodMayBeStatic
     def _getImageDraw(self, image):
         """Returns an instance of ImageDraw with the proper dimensions and background color"""
         draw = UniDraw(image)
@@ -266,18 +277,17 @@ class GeneralPlot(object):
         axis_label_font = weeplot.utilities.get_font_handle(self.axis_label_font_path,
                                                             self.axis_label_font_size)
 
-        drawlabel = False
+        drawlabelcount = 0
         for x in weeutil.weeutil.stampgen(self.xscale[0], self.xscale[1], self.xscale[2]) :
             sdraw.line((x, x), (self.yscale[0], self.yscale[1]), fill=self.chart_gridline_color,
                        width=self.anti_alias)
-            drawlabel = not drawlabel
-            if drawlabel:
+            if drawlabelcount % self.x_label_spacing == 0 :
                 xlabel = self._genXLabel(x)
                 axis_label_size = sdraw.draw.textsize(xlabel, font=axis_label_font)
                 xpos = sdraw.xtranslate(x)
                 sdraw.draw.text((xpos - axis_label_size[0]/2, self.image_height - self.bmargin + 2),
                                 xlabel, fill=self.axis_label_font_color, font=axis_label_font)
-                
+            drawlabelcount += 1
 
     def _renderYAxes(self, sdraw):
         """Draws the y axis and horizontal constant-y lines, as well as the labels.
@@ -294,7 +304,7 @@ class GeneralPlot(object):
             sdraw.line((self.xscale[0], self.xscale[1]), (y, y), fill=self.chart_gridline_color,
                        width=self.anti_alias)
             # Draw a label on every other line:
-            if i%2 == 0 :
+            if i % self.y_label_spacing == 0 :
                 ylabel = self._genYLabel(y)
                 axis_label_size = sdraw.draw.textsize(ylabel, font=axis_label_font)
                 ypos = sdraw.ytranslate(y)
@@ -454,10 +464,9 @@ class GeneralPlot(object):
         plots where the x-axis represents time.
         
         """
-        if self.xscale is None :
-            (xmin, xmax) = self._calcXMinMax()
-                
-            self.xscale = weeplot.utilities.scale(xmin, xmax)
+        (xmin, xmax) = self._calcXMinMax()
+
+        self.xscale = weeplot.utilities.scale(xmin, xmax, self.xscale, nsteps=self.x_nticks)
             
     def _calcYScaling(self):
         """Calculates y scaling. Can be used 'as-is' for most purposes."""
@@ -469,6 +478,7 @@ class GeneralPlot(object):
         for line in self.line_list:
             if line.plot_type == 'vector':
                 try:
+                    # For progressive vector plots, we want the magnitude of the complex vector
                     yline_max = max(abs(c) for c in filter(lambda v : v is not None, line.y))
                 except ValueError:
                     yline_max = None
@@ -483,7 +493,7 @@ class GeneralPlot(object):
             # No valid data. Pick an arbitrary scaling
             self.yscale=(0.0, 1.0, 0.2)
         else:
-            self.yscale = weeplot.utilities.scale(ymin, ymax, self.yscale)
+            self.yscale = weeplot.utilities.scale(ymin, ymax, self.yscale, nsteps=self.y_nticks)
 
     def _calcXLabelFormat(self):
         if self.x_label_format is None:
@@ -519,7 +529,7 @@ class TimePlot(GeneralPlot) :
     
     def _calcXScaling(self):
         """Specialized version for time plots."""
-        if self.xscale is None :
+        if None in self.xscale:
             (xmin, xmax) = self._calcXMinMax()
             self.xscale = weeplot.utilities.scaletime(xmin, xmax)
 
@@ -549,22 +559,22 @@ class PlotLine(object):
     """Represents a single line (or bar) in a plot.
     
     """
-    def __init__(self, x, y, label='', color=None, width=None, plot_type='line',
+    def __init__(self, x, y, label='', color=None, fill_color=None, width=None, plot_type='line',
                  line_type='solid', marker_type=None, marker_size=10, 
                  bar_width=None, vector_rotate = None, gap_fraction=None):
-        self.x           = x
-        self.y           = y
-        self.label       = to_unicode(label)
-        self.plot_type   = plot_type
-        self.line_type   = line_type
-        self.marker_type = marker_type
-        self.marker_size = marker_size
-        self.color       = color
-        self.fill_color  = color
-        self.width       = width
-        self.bar_width   = bar_width
-        self.vector_rotate = vector_rotate
-        self.gap_fraction = gap_fraction
+        self.x               = x
+        self.y               = y
+        self.label           = to_unicode(label)
+        self.plot_type       = plot_type
+        self.line_type       = line_type
+        self.marker_type     = marker_type
+        self.marker_size     = marker_size
+        self.color           = color
+        self.fill_color      = fill_color
+        self.width           = width
+        self.bar_width       = bar_width
+        self.vector_rotate   = vector_rotate
+        self.gap_fraction    = gap_fraction
 
 class UniDraw(ImageDraw.ImageDraw):
     """Supports non-Unicode fonts

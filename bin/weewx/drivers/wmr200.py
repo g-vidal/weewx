@@ -48,7 +48,7 @@ import weewx.drivers
 import weeutil.weeutil
 
 DRIVER_NAME = 'WMR200'
-DRIVER_VERSION = "3.3.2"
+DRIVER_VERSION = "3.3.5"
 
 
 def loader(config_dict, engine):  # @UnusedVariable
@@ -114,6 +114,8 @@ DEBUG_CONFIG_DATA = 0
 DEBUG_WRITES = 0
 DEBUG_READS = 0
 DEBUG_CHECKSUM = 0
+# Print mapping from sensors to database fields
+DEBUG_MAPPING = 0
 
 def logmsg(dst, msg):
     """Base syslog helper"""
@@ -736,10 +738,7 @@ def decode_wind(pkt, pkt_data):
                      | (pkt_data[4] << 4)) / 10.0
         # Wind direction in steps of 22.5 degrees.
         # 0 is N, 1 is NNE and so on. See WIND_DIR_MAP for complete list.
-        # Default to none unless speed is above zero.
-        dir_deg = None
-        if avg_speed > 0.0:
-            dir_deg = (pkt_data[0] & 0x0f) * 22.5
+        dir_deg = (pkt_data[0] & 0x0f) * 22.5
 
         # Windchill temperature. The value is in degrees F.
         # Set default to no windchill as it may not exist.
@@ -1581,6 +1580,8 @@ class WMR200(weewx.drivers.AbstractDevice):
         DEBUG_PACKETS_PRESSURE = int(stn_dict.get('debug_packets_pressure', 0))
         global DEBUG_CHECKSUM
         DEBUG_CHECKSUM = int(stn_dict.get('debug_checksum', 0))
+        global DEBUG_MAPPING
+        DEBUG_MAPPING = int(stn_dict.get('debug_mapping', 0))
 
         if DEBUG_CONFIG_DATA:
             logdbg('Configuration setup')
@@ -1799,7 +1800,8 @@ class WMR200(weewx.drivers.AbstractDevice):
                        % pkt.pkt_id)
                 mapped = self._sensors_to_fields(pkt.packet_record(),
                                                  self._sensor_map)
-                yield mapped
+                if mapped:
+                    yield mapped
 
     def XXXgenArchiveRecords(self, since_ts=0):
         """A generator function to return archive packets from the wmr200.
@@ -1953,6 +1955,8 @@ class WMR200(weewx.drivers.AbstractDevice):
                     # Calculate the rain accumulation between valid archive 
                     # packets.
                     pkt.record_update(adjust_rain(pkt, PacketArchiveData))
+                    # Ensure that the packet has a valid 'interval' field
+                    pkt.record_update({'interval': int(timestamp_packet_interval / 60.0)})
 
                     timestamp_packet_previous = timestamp_packet_current
                     cnt += 1
@@ -2039,6 +2043,7 @@ class WMR200(weewx.drivers.AbstractDevice):
     @staticmethod
     def _sensors_to_fields(oldrec, sensor_map):
         # map a record with observation names to a record with db field names
+        newrec = None
         if oldrec:
             newrec = dict()
             for k in sensor_map:
@@ -2049,8 +2054,10 @@ class WMR200(weewx.drivers.AbstractDevice):
                 newrec['usUnits'] = oldrec['usUnits']
                 if 'interval' in oldrec:
                     newrec['interval'] = oldrec['interval']
-                return newrec
-        return None
+        if DEBUG_MAPPING:
+            logdbg("sensors: %s" % oldrec)
+            logdbg("fields: %s" % newrec)
+        return newrec
 
 
 class WMR200ConfEditor(weewx.drivers.AbstractConfEditor):
